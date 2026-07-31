@@ -1,0 +1,43 @@
+name: relp-build-probe
+
+# Zweck: pruefen, ob Vector in GitHub Actions auf einem privaten Fork baubar ist,
+# BEVOR Zeit in eine RELP-Source investiert wird. Zwei offene Fragen:
+#   1. reicht der Plattenplatz des Standard-Runners fuer Vectors target/?
+#   2. laeuft die auf Rust 1.95 gepinnte Toolchain durch?
+# Bewusst NICHT ubuntu-24.04-8core wie Vectors eigene CI - groessere Runner gibt es
+# auf einem privaten Fork nicht. Und bewusst nur cargo check mit reduziertem
+# Feature-Satz statt Vollbau: die Frage ist die Machbarkeit, nicht das Artefakt.
+on:
+  push:
+    branches: [ci-build-probe]
+  workflow_dispatch:
+
+jobs:
+  probe:
+    runs-on: ubuntu-24.04
+    timeout-minutes: 120
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Platz und Kerne vorher
+        run: |
+          echo "Kerne: $(nproc), RAM: $(free -g | awk '/Mem:/{print $2}') GB"
+          df -h / /mnt
+
+      - name: Build-Abhaengigkeiten (Vectors eigenes Skript)
+        run: sudo bash scripts/environment/install-debian-build-deps.sh
+
+      - name: protoc
+        run: sudo bash scripts/environment/install-protoc.sh
+
+      - name: Toolchain (rust-toolchain.toml pinnt 1.95)
+        run: rustc --version && cargo --version
+
+      - name: cargo check - nur syslog-Source und console-Sink
+        run: cargo check --no-default-features --features sources-syslog,sinks-console
+
+      - name: Platz nachher
+        if: always()
+        run: |
+          df -h / /mnt
+          du -sh target 2>/dev/null || true
