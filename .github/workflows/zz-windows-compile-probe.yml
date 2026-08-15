@@ -20,11 +20,18 @@ permissions:
 jobs:
   compile-and-unit-test:
     runs-on: windows-latest
-    timeout-minutes: 60
+    timeout-minutes: 90
     steps:
       - uses: actions/checkout@v4
 
-      - uses: dtolnay/rust-toolchain@stable
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      # Offizieller Upstream-Bootstrap: setzt Rust, protoc, LIBCLANG_PATH,
+      # OPENSSL_SRC_PERL und PROTO_NO_VENDOR. Ohne ihn scheitert der Build in
+      # proto-build mit "Could not find `protoc`" (Lauf #1).
+      - run: .\scripts\environment\bootstrap-windows-2025.ps1
 
       - uses: Swatinem/rust-cache@v2
         with:
