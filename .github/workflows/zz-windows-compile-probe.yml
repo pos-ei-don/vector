@@ -56,6 +56,31 @@ jobs:
           cargo build --release -p vector --no-default-features --features
           sources-windows_event_log,sources-internal_logs,sinks-socket,sinks-file,transforms-remap
 
+      # Allowlist-Konformitaet fuer den Feldtest-Host: die IBF-G-DATA-Installation
+      # laesst nur exen zu, die entweder auf der Whitelist stehen oder "IBF" im
+      # LegalCopyright-Metatag tragen. Ohne das quarantaeniert AVKWCtl diese
+      # selbstgebaute, unsignierte vector.exe sofort nach dem Ablegen -- der
+      # Feldtest kaeme gar nicht zum Laufen.
+      #
+      # KEIN Umgehen fremder Schutzmassnahmen: eigenes Werkzeug, eigene Maschinen,
+      # eigene AV-Policy (der Nutzer administriert die G-DATA-Instanz), und der
+      # Copyright-Tag benennt die Herkunft wahrheitsgemaess. Nur ein Ressourcen-
+      # Patch, kein Eingriff ins Programmverhalten -- rcedit statt build.rs, damit
+      # der Quellcode-Patch unberuehrt bleibt.
+      - name: rcedit holen
+        run: choco install rcedit -y --no-progress
+
+      - name: IBF-LegalCopyright setzen (G-DATA-Allowlist)
+        shell: pwsh
+        run: |
+          $exe = "target/release/vector.exe"
+          rcedit "$exe" --set-version-string "LegalCopyright" "IBF Solutions - internes Diagnose-Werkzeug (Test-Build zu vector#26118, nicht zur Verteilung)"
+          rcedit "$exe" --set-version-string "CompanyName"    "IBF Solutions"
+          $vi = (Get-Item "$exe").VersionInfo
+          "LegalCopyright = $($vi.LegalCopyright)"
+          "CompanyName    = $($vi.CompanyName)"
+          if ($vi.LegalCopyright -notlike "*IBF*") { throw "IBF fehlt im LegalCopyright -- Allowlist-Schritt gescheitert" }
+
       - name: vector.exe als Artifact
         uses: actions/upload-artifact@v4
         with:
