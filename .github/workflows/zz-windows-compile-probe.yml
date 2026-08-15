@@ -1,0 +1,41 @@
+# Wegwerf-Sonde: gehoert NICHT in einen PR.
+#
+# Zweck: den windows_event_log-Patch auf einem echten Windows-Runner kompilieren und
+# die Unit-Tests des Moduls fahren, OHNE dafuer einen PR bei vectordotdev/vector zu
+# brauchen. Upstream laeuft der Windows-Job auf `windows-2025-8core` (Large Runner,
+# in einem persoenlichen Fork nicht verfuegbar) und nur auf `pull_request`.
+#
+# Laeuft nur auf ci-probe/**-Branches, damit sie nichts anderes anfasst.
+name: windows-compile-probe
+
+on:
+  push:
+    branches:
+      - "ci-probe/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  compile-and-unit-test:
+    runs-on: windows-latest
+    timeout-minutes: 60
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: dtolnay/rust-toolchain@stable
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: windows-event-log-probe
+
+      # Erst nur pruefen: faengt Compile-Fehler im Patch schnell, ohne die volle
+      # Test-Kompilierung abzuwarten.
+      - name: cargo check (sources-windows_event_log)
+        run: cargo check -p vector --no-default-features --features sources-windows_event_log --lib
+
+      # Dann die Unit-Tests des Moduls. Die Integrationstests brauchen Admin-Rechte
+      # und einen beschreibbaren Application-Kanal -- die laufen upstream separat.
+      - name: cargo test (windows_event_log unit tests)
+        run: cargo test -p vector --no-default-features --features sources-windows_event_log --lib windows_event_log
