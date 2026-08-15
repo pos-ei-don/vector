@@ -36,6 +36,9 @@ jobs:
       - uses: Swatinem/rust-cache@v2
         with:
           key: windows-event-log-probe
+          # Auch speichern, wenn ein spaeterer Schritt (z. B. rcedit) scheitert --
+          # sonst baut jeder Folgelauf den teuren Release-Build erneut von vorn.
+          cache-on-failure: true
 
       # Erst nur pruefen: faengt Compile-Fehler im Patch schnell, ohne die volle
       # Test-Kompilierung abzuwarten.
@@ -74,12 +77,22 @@ jobs:
         shell: pwsh
         run: |
           $exe = "target/release/vector.exe"
-          rcedit "$exe" --set-version-string "LegalCopyright" "IBF Solutions - internes Diagnose-Werkzeug (Test-Build zu vector#26118, nicht zur Verteilung)"
-          rcedit "$exe" --set-version-string "CompanyName"    "IBF Solutions"
-          $vi = (Get-Item "$exe").VersionInfo
-          "LegalCopyright = $($vi.LegalCopyright)"
-          "CompanyName    = $($vi.CompanyName)"
-          if ($vi.LegalCopyright -notlike "*IBF*") { throw "IBF fehlt im LegalCopyright -- Allowlist-Schritt gescheitert" }
+          # Lauf 6 scheiterte, weil die feature-reduzierte cargo-Binary GAR KEINEN
+          # VERSIONINFO-Block hat -- rcedit hatte keinen StringFileInfo, in den es
+          # LegalCopyright schreiben konnte, und lieferte still leer zurueck.
+          # --set-file-version / --set-product-version erzwingen den kompletten
+          # VS_VERSION_INFO-Block; ERST dann greifen die --set-version-string.
+          rcedit "$exe" `
+            --set-file-version "0.58.0" `
+            --set-product-version "0.58.0" `
+            --set-version-string "CompanyName"    "IBF Solutions" `
+            --set-version-string "ProductName"    "Vector (IBF Test-Build)" `
+            --set-version-string "LegalCopyright" "IBF Solutions - internes Diagnose-Werkzeug (Test-Build zu vector#26118, nicht zur Verteilung)"
+          # Gegenpruefung mit rcedits EIGENEM Getter, nicht ueber .NET-VersionInfo:
+          # .NET liest je nach Codepage-Block u. U. leer, obwohl der Wert gesetzt ist.
+          $lc = (rcedit "$exe" --get-version-string "LegalCopyright") -join ""
+          "rcedit liest LegalCopyright = $lc"
+          if ($lc -notlike "*IBF*") { throw "IBF fehlt im LegalCopyright -- Allowlist-Schritt gescheitert" }
 
       - name: vector.exe als Artifact
         uses: actions/upload-artifact@v4
