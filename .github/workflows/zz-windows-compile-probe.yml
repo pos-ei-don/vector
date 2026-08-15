@@ -57,7 +57,7 @@ jobs:
       - name: cargo build --release (Feldtest-Binary)
         run: >
           cargo build --release -p vector --no-default-features --features
-          sources-windows_event_log,sources-internal_logs,sinks-socket,sinks-file,transforms-remap
+          sources-windows_event_log,sources-file,sources-internal_logs,sinks-socket,sinks-file,transforms-remap
 
       # Allowlist-Konformitaet fuer den Feldtest-Host: die IBF-G-DATA-Installation
       # laesst nur exen zu, die entweder auf der Whitelist stehen oder "IBF" im
