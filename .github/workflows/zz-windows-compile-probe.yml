@@ -46,3 +46,19 @@ jobs:
       # und einen beschreibbaren Application-Kanal -- die laufen upstream separat.
       - name: cargo test (windows_event_log unit tests)
         run: cargo test -p vector --no-default-features --features sources-windows_event_log --lib windows_event_log
+
+      # Feldtest-Binary. Genau die Features, die die Pilot-Config auf VM-PWACKER
+      # braucht -- nicht die Default-Features, das spart hier den Grossteil der
+      # Bauzeit. Ziel ist NICHT ein Release, sondern eine vector.exe, mit der sich
+      # auf dem Host messen laesst, der den Fehler urspruenglich reproduziert hat.
+      - name: cargo build --release (Feldtest-Binary)
+        run: >
+          cargo build --release -p vector --no-default-features --features
+          sources-windows_event_log,sources-internal_logs,sinks-socket,sinks-file,transforms-remap
+
+      - name: vector.exe als Artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: vector-windows-patched
+          path: target/release/vector.exe
+          retention-days: 3
