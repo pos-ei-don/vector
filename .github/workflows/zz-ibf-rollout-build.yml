@@ -1,0 +1,175 @@
+# Rollout-Build fuer die IBF-Windows-Flotte. Gehoert NICHT in einen Upstream-PR.
+#
+# ABGRENZUNG zur Schwesterdatei zz-windows-compile-probe.yml: die Sonde baut mit
+# --no-default-features ein DIAGNOSE-Werkzeug (39 MB) fuer genau eine Frage. Sie
+# war nie ein Rollout-Kandidat, und ihr eigenes LegalCopyright sagt das auch
+# ("nicht zur Verteilung"). Am 2026-09-16 wurde sie trotzdem beinahe verteilt,
+# weil beide Binaerdateien auf den Zielmaschinen unter demselben Dateinamen lagen.
+# Diese Datei baut das Gegenstueck: vollstaendig, verteilbar, beschriftet.
+#
+# Laeuft nur auf ibf-build/**-Branches.
+name: ibf-rollout-build
+
+on:
+  push:
+    branches:
+      - "ibf-build/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    # Die Sonde stand auf 90 min -- sie baute aber nur einen Bruchteil der Crates.
+    # Upstream baut denselben Umfang auf windows-2025-8core (Large Runner, im
+    # persoenlichen Fork nicht verfuegbar); hier stehen 4 Kerne zur Verfuegung.
+    # 90 min reichen dafuer nicht, 360 sind das Maximum, das GitHub ohnehin setzt.
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+
+      # Offizieller Upstream-Bootstrap: Rust, protoc, LIBCLANG_PATH,
+      # OPENSSL_SRC_PERL, PROTO_NO_VENDOR. Ohne ihn scheitert proto-build.
+      - run: .\scripts\environment\bootstrap-windows-2025.ps1
+
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ibf-rollout-0.58.0
+          cache-on-failure: true
+
+      # ⭐ VOLLER FUNKTIONSUMFANG -- kein --no-default-features.
+      # Upstream baut das Windows-Release mit FEATURES="default"
+      # (.github/workflows/publish.yml, Job build-x86_64-pc-windows-msvc-packages).
+      # Genau diesen Satz nehmen wir, damit das Binaer funktional dasselbe kann wie
+      # das offizielle Release -- nur eben mit unserem Patch.
+      #
+      # WARUM NICHT EINEN PASSGENAUEN FEATURE-SATZ: weil man ihn raten muesste.
+      # Die Sonde hatte genau das getan und dabei filter, throttle, reduce und
+      # get_hostname!() verloren -- was erst auffiel, als die fertige Konfiguration
+      # mit EXIT=78 abbrach. "default" macht die Frage gegenstandslos.
+      #
+      # tikv-jemallocator steht zwar in `default`, haengt aber unter
+      # [target.'cfg(unix)'.dependencies] -- auf Windows ist es wirkungslos.
+      - name: cargo build --release (default features)
+        run: cargo build --release -p vector
+
+      # --- ab hier: beweisen, nicht behaupten -------------------------------
+
+      - name: Komponenten-Nachweis
+        shell: pwsh
+        run: |
+          $exe = "target/release/vector.exe"
+          & $exe list | Tee-Object -FilePath komponenten.txt
+          # Genau die Bausteine, an denen die Sonde gescheitert ist.
+          $noetig = @('filter', 'throttle', 'remap', 'reduce')
+          $liste  = (Get-Content komponenten.txt) -join "`n"
+          $fehlt  = $noetig | Where-Object { $liste -notmatch "(?m)^\s*-\s*$_\s*$" }
+          if ($fehlt) { throw "Diese Transforms fehlen im Binaer: $($fehlt -join ', ')" }
+          "Alle benoetigten Transforms vorhanden."
+
+      # Gegenprobe auf Konfigurations-Ebene: die IBF-Konfiguration selbst gehoert
+      # NICHT in dieses oeffentliche Repo (sie nennt interne Adressen). Geprueft
+      # wird deshalb eine synthetische Konfiguration mit derselben BAUFORM --
+      # dieselben Komponententypen, erfundene Adressen. --no-environment laesst
+      # Erreichbarkeitspruefungen weg; gefragt ist, ob das Binaer die Form kennt.
+      - name: validate gegen die Bauform der Rollout-Konfiguration
+        shell: pwsh
+        run: |
+          @'
+          [sources.win_security]
+          type = "windows_event_log"
+          channel = "Security"
+
+          [sources.datei]
+          type = "file"
+          include = ["C:\\Temp\\bauform-probe\\*.log"]
+          read_from = "beginning"
+
+          [sources.selbst]
+          type = "internal_logs"
+
+          [transforms.security_filter]
+          type = "filter"
+          inputs = ["win_security"]
+          condition = '.event_id == 4625'
+
+          [transforms.selbst_bremse]
+          type = "throttle"
+          inputs = ["selbst"]
+          threshold = 10
+          window_secs = 60
+
+          [transforms.felder]
+          type = "remap"
+          inputs = ["security_filter", "datei"]
+          source = '''
+            .host = get_hostname!()
+            .short_message = string!(.message)
+          '''
+
+          [sinks.graylog]
+          type = "socket"
+          inputs = ["felder"]
+          mode = "tcp"
+          address = "192.0.2.1:12201"
+          encoding.codec = "json"
+
+          [sinks.selbstlog]
+          type = "file"
+          inputs = ["selbst_bremse"]
+          path = "C:\\Temp\\bauform-probe\\vector-%Y-%m-%d.log"
+          encoding.codec = "text"
+          '@ | Set-Content -Encoding UTF8 bauform-probe.toml
+          & "target/release/vector.exe" validate --no-environment bauform-probe.toml
+          if ($LASTEXITCODE -ne 0) { throw "validate gescheitert (EXIT=$LASTEXITCODE)" }
+
+      # G-DATA-Anwendungskontrolle im Haus laesst nur exen zu, die "IBF" im
+      # LegalCopyright tragen. Eigenes Werkzeug, eigene Maschinen, eigene
+      # AV-Policy; der Tag benennt die Herkunft wahrheitsgemaess. Nur ein
+      # Ressourcen-Patch, kein Eingriff ins Programmverhalten.
+      - name: rcedit holen
+        run: choco install rcedit -y --no-progress
+
+      - name: IBF-LegalCopyright setzen
+        shell: pwsh
+        run: |
+          $exe = "target/release/vector.exe"
+          # --set-file-version / --set-product-version erzwingen den kompletten
+          # VS_VERSION_INFO-Block; erst dann greifen die --set-version-string.
+          # (Die Sonde scheiterte daran in Lauf 6 -- still, mit leerem Ergebnis.)
+          rcedit "$exe" `
+            --set-file-version "0.58.0" `
+            --set-product-version "0.58.0" `
+            --set-version-string "CompanyName"    "IBF Solutions" `
+            --set-version-string "ProductName"    "Vector (IBF Build)" `
+            --set-version-string "LegalCopyright" "IBF Solutions - Vector Log-Shipper (enthaelt vector#26118)"
+          # Gegenprobe mit rcedits EIGENEM Getter: .NET-VersionInfo liest je nach
+          # Codepage-Block leer, obwohl der Wert gesetzt ist.
+          $lc = (rcedit "$exe" --get-version-string "LegalCopyright") -join ""
+          "rcedit liest LegalCopyright = $lc"
+          if ($lc -notlike "*IBF*") { throw "IBF fehlt im LegalCopyright -- Allowlist-Schritt gescheitert" }
+
+      - name: Fingerabdruck
+        shell: pwsh
+        run: |
+          $exe = "target/release/vector.exe"
+          $h = (Get-FileHash $exe -Algorithm SHA256).Hash
+          $mb = [math]::Round((Get-Item $exe).Length / 1MB, 1)
+          "SHA256 : $h"
+          "Groesse: $mb MB"
+          "$h  vector.exe" | Set-Content -Encoding ASCII vector.exe.sha256
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vector-windows-ibf-rollout
+          path: |
+            target/release/vector.exe
+            vector.exe.sha256
+            komponenten.txt
+          retention-days: 14
