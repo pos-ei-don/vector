@@ -84,7 +84,10 @@ jobs:
           @'
           [sources.win_security]
           type = "windows_event_log"
-          channel = "Security"
+          # Mehrzahl. Lauf 2 scheiterte hier mit EXIT=78 an `channel` -- die echte
+          # 00-basis.toml hatte es die ganze Zeit richtig, nur diese Probe nicht.
+          # Das Tor hat also funktioniert; es stand nur schief.
+          channels = ["Security"]
 
           [sources.datei]
           type = "file"
@@ -118,7 +121,15 @@ jobs:
           inputs = ["felder"]
           mode = "tcp"
           address = "192.0.2.1:12201"
-          encoding.codec = "json"
+          # gelf, nicht json -- die Rollout-Konfiguration nutzt gelf, und der
+          # Codec stellt eigene Anforderungen (host, short_message). Eine Probe
+          # mit json haette genau die Stelle nicht geprueft, auf die es ankommt.
+          encoding.codec = "gelf"
+
+            [sinks.graylog.buffer]
+            type = "disk"
+            max_size = 536870912
+            when_full = "drop_newest"
 
           [sinks.selbstlog]
           type = "file"
