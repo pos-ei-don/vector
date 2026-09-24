@@ -25,6 +25,8 @@ jobs:
     timeout-minutes: 360
     steps:
       - uses: actions/checkout@v4
+        with:
+          fetch-depth: 50
       - uses: actions/setup-python@v5
         with:
           python-version: "3.10"
@@ -37,15 +39,32 @@ jobs:
         run: cargo test -p vector --no-default-features --features sources-windows_event_log --lib sources::windows_event_log
       - name: integration tests
         run: cargo test -p vector --no-default-features --features sources-windows_event_log-integration-tests windows_event_log::integration_tests
-      # vector-core hat auf Windows vorbestehende Clippy-Fehler (tls/settings.rs,
-      # nicht Teil dieses PR) und bricht sonst ab, bevor das Modul gelintet wird.
-      # Deshalb --cap-lints warn und danach NUR die eigenen Dateien bewerten.
-      - name: clippy (nur windows_event_log bewerten)
+      # vector-core und der Rest des Moduls haben auf Windows ~400 vorbestehende
+      # Clippy-Meldungen. Deshalb --cap-lints warn und danach NUR die Zeilen
+      # bewerten, die dieser Zweig gegenueber upstream master aendert.
+      - name: clippy (nur geaenderte Zeilen bewerten)
         shell: bash
         run: |
-          cargo clippy -p vector --no-default-features --features sources-windows_event_log-integration-tests --lib --tests -- --cap-lints warn 2>&1 | tee clippy.log
-          echo "--- Treffer in src/sources/windows_event_log:"
-          if grep -E -A6 '^(warning|error)' clippy.log | grep -E 'src[\\/]sources[\\/]windows_event_log'; then
-            echo "Clippy meldet etwas im geaenderten Modul"; exit 1
-          fi
-          echo "keine"
+          cargo clippy -p vector --no-default-features --features sources-windows_event_log-integration-tests --lib --tests -- --cap-lints warn > clippy.log 2>&1 || true
+          git fetch --depth=50 https://github.com/vectordotdev/vector.git master
+          git diff -U0 "$(git merge-base HEAD FETCH_HEAD)" HEAD -- src > aenderung.diff
+          python - <<'PY'
+          import re, collections, sys
+          ranges = collections.defaultdict(list); cur = None
+          for l in open("aenderung.diff", encoding="utf-8"):
+              if l.startswith("+++ b/"): cur = l[6:].strip().replace("/", "\\")
+              elif l.startswith("@@"):
+                  m = re.search(r"\+(\d+)(?:,(\d+))?", l); s, n = int(m.group(1)), int(m.group(2) or 1)
+                  if n: ranges[cur].append((s, s + n - 1))
+          log = open("clippy.log", encoding="utf-8", errors="replace").read().splitlines()
+          if not any(l.startswith(("warning", "error")) for l in log) or any(l.startswith("error: could not compile") for l in log):
+              print("\n".join(log[-40:])); sys.exit("clippy lief nicht vollstaendig")
+          hits = []
+          for i, l in enumerate(log):
+              m = re.match(r"\s*--> (src\\\S+?\.rs):(\d+):", l)
+              if m and any(a <= int(m.group(2)) <= b for a, b in ranges.get(m.group(1), [])):
+                  hits.append(f"{m.group(1)}:{m.group(2)}  {log[i-1].strip()}")
+          print("geaenderte Bereiche:", dict(ranges))
+          print("Treffer in geaenderten Zeilen:", len(hits)); print("\n".join(hits))
+          sys.exit(1 if hits else 0)
+          PY
