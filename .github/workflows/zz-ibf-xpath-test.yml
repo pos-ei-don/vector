@@ -1,0 +1,41 @@
+# Nachweis fuer den Upstream-PR "keep only_event_ids XPath query shallow".
+# Gehoert NICHT in den PR -- liegt nur auf ibf-test/**-Zweigen im Fork.
+name: ibf-xpath-test
+
+on:
+  push:
+    branches:
+      - "ibf-test/**"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  fmt:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: rustup show active-toolchain || rustup toolchain install
+      - run: rustup component add rustfmt
+      - run: cargo fmt --all -- --check
+
+  windows:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: .\scripts\environment\bootstrap-windows-2025.ps1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ibf-xpath-depth
+          cache-on-failure: true
+      - name: clippy (windows_event_log, lib + tests)
+        run: cargo clippy -p vector --no-default-features --features sources-windows_event_log-integration-tests --lib --tests -- -D warnings
+      - name: unit tests
+        run: cargo test -p vector --no-default-features --features sources-windows_event_log --lib sources::windows_event_log
+      - name: integration tests
+        run: cargo test -p vector --no-default-features --features sources-windows_event_log-integration-tests windows_event_log::integration_tests
