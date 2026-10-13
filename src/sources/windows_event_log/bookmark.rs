@@ -23,6 +23,11 @@ const MAX_BOOKMARK_XML_SIZE: usize = 1024 * 1024;
 #[derive(Debug)]
 pub struct BookmarkManager {
     handle: EVT_HANDLE,
+    /// True once the bookmark points at an event: restored from a non-empty
+    /// checkpoint, or advanced via `update()`. A fresh bookmark from
+    /// `EvtCreateBookmark(None)` is a valid handle but has no position, and
+    /// resuming "after" it is not defined by the wevtapi documentation.
+    positioned: bool,
 }
 
 impl BookmarkManager {
@@ -40,7 +45,10 @@ impl BookmarkManager {
 
             debug!(message = "Created new bookmark.", handle = ?handle);
 
-            Ok(Self { handle })
+            Ok(Self {
+                handle,
+                positioned: false,
+            })
         }
     }
 
@@ -65,7 +73,10 @@ impl BookmarkManager {
             match EvtCreateBookmark(&xml_hstring) {
                 Ok(handle) => {
                     debug!(message = "Created bookmark from XML.", handle = ?handle);
-                    Ok(Self { handle })
+                    Ok(Self {
+                        handle,
+                        positioned: true,
+                    })
                 }
                 Err(e) => {
                     // Propagate the error so the caller can decide how to handle it
@@ -95,8 +106,14 @@ impl BookmarkManager {
             })?;
 
             debug!(message = "Updated bookmark.", event_handle = ?event_handle);
+            self.positioned = true;
             Ok(())
         }
+    }
+
+    /// Whether the bookmark points at an event (see the `positioned` field).
+    pub const fn is_positioned(&self) -> bool {
+        self.positioned
     }
 
     /// Serializes the bookmark to XML for persistence
