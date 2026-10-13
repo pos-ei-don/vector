@@ -155,8 +155,8 @@ jobs:
           # VS_VERSION_INFO-Block; erst dann greifen die --set-version-string.
           # (Die Sonde scheiterte daran in Lauf 6 -- still, mit leerem Ergebnis.)
           rcedit "$exe" `
-            --set-file-version "0.59.0" `
-            --set-product-version "0.59.0" `
+            --set-file-version "0.59.1" `
+            --set-product-version "0.59.1" `
             --set-version-string "CompanyName"    "IBF Solutions" `
             --set-version-string "ProductName"    "Vector (IBF Build)" `
             --set-version-string "LegalCopyright" "IBF Solutions - Vector Log-Shipper (enthaelt vector#26118 #26477 #26125)"
