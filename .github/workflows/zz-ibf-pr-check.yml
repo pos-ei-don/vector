@@ -1,0 +1,46 @@
+# Nur im Pruef-Zweig ibf-check/** (nicht Teil eines Upstream-PRs): Clippy + Unit-Tests der
+# windows_event_log-Quelle unter Windows. Lokal gibt es kein Rust (IBF-Regel), und der Code ist cfg(windows).
+name: ibf-pr-check
+on:
+  push:
+    branches:
+      - "ibf-check/**"
+  workflow_dispatch:
+permissions:
+  contents: read
+jobs:
+  check:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: .\scripts\environment\bootstrap-windows-2025.ps1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ibf-pr-check-wel
+          cache-on-failure: true
+      # Upstream-Code ausserhalb der Quelle (z. B. lib/vector-core tls/settings.rs, nur unter Windows gebaut) faellt
+      # mit der aktuellen Clippy-Version durch, unabhaengig von uns. Deshalb alle Lints auf "warn" kappen und nur
+      # Befunde in src/sources/windows_event_log zum Fehler machen.
+      - name: rustfmt (windows_event_log)
+        shell: pwsh
+        run: |
+          rustfmt --edition 2024 --config newline_style=Native --check (Get-ChildItem src\sources\windows_event_log\*.rs).FullName
+      # Nur Bericht: der Abgleich gegen die geaenderten Zeilen des PRs passiert ausserhalb (Upstream-Code hat 100+
+      # Altbefunde unter dieser Clippy-Version). Entscheidend fuer Gruen sind die Tests.
+      - name: clippy (windows_event_log)
+        continue-on-error: true
+        shell: pwsh
+        env:
+          RUSTFLAGS: "--cap-lints warn"
+        run: |
+          cargo clippy -p vector --lib --no-default-features --features sources-windows_event_log --message-format short 2>&1 | Tee-Object clippy.txt
+          if ($LASTEXITCODE -ne 0) { throw "clippy exit $LASTEXITCODE" }
+          $eigen = Select-String -Path clippy.txt -Pattern 'src[\\/]sources[\\/]windows_event_log[^:]*:\d+:\d+: (warning|error)'
+          $eigen | ForEach-Object { $_.Line }
+          if ($eigen) { throw "$(@($eigen).Count) Befund(e) in src/sources/windows_event_log" }
+      - name: unit tests (windows_event_log)
+        run: cargo test -p vector --lib --no-default-features --features sources-windows_event_log sources::windows_event_log
