@@ -1,0 +1,40 @@
+# TEST-BINARY fuer vectordotdev/vector#26888 (Kanal zur Laufzeit abgemeldet). NICHT zur Verteilung,
+# gehoert NICHT in einen Upstream-PR -- liegt nur auf ibf-test/**-Zweigen im Fork.
+name: ibf-test-26888
+
+on:
+  push:
+    branches:
+      - "ibf-test/pr26118-26888"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  build:
+    runs-on: windows-latest
+    timeout-minutes: 360
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-python@v5
+        with:
+          python-version: "3.10"
+      - run: .\scripts\environment\bootstrap-windows-2025.ps1
+      - uses: Swatinem/rust-cache@v2
+        with:
+          key: ibf-test-26888
+          cache-on-failure: true
+      - name: cargo build --release (nur Event-Log-Quelle + Datei/Konsole)
+        run: cargo build --release -p vector --no-default-features --features sources-windows_event_log,sources-internal_logs,sinks-file,sinks-console
+      - name: umbenennen
+        shell: pwsh
+        run: |
+          Copy-Item target/release/vector.exe vector-TEST-26888-nicht-verteilen.exe
+          & ./vector-TEST-26888-nicht-verteilen.exe --version
+          (Get-FileHash vector-TEST-26888-nicht-verteilen.exe -Algorithm SHA256).Hash
+      - uses: actions/upload-artifact@v4
+        with:
+          name: vector-TEST-26888-nicht-verteilen
+          path: vector-TEST-26888-nicht-verteilen.exe
+          retention-days: 7
