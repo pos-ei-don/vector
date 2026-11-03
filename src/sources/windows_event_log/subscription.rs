@@ -833,7 +833,7 @@ impl EventLogSubscription {
                                 idle_resubscribes = channel_sub.idle_resubscribes
                             );
                         }
-                        match Self::resubscribe_channel(channel_sub, &self.config) {
+                        match Self::resubscribe_channel(channel_sub, &self.config, loud) {
                             Ok(()) => {
                                 if loud {
                                     info!(
@@ -1083,10 +1083,25 @@ impl EventLogSubscription {
     /// invalidated query position, e.g. after an admin cleared the event log; a restarted Event
     /// Log service; or a channel that was unregistered and registered again). Creates a new
     /// handle from the current bookmark and only then closes the old one.
+    ///
+    /// `loud` is the caller's log sampling (first attempt and powers of two): a rebuild that keeps
+    /// failing, e.g. while the Event Log service is down, is retried every few seconds, so the
+    /// fallback warnings below follow the same sampling instead of firing on every retry.
     fn resubscribe_channel(
         channel_sub: &mut ChannelSubscription,
         config: &WindowsEventLogConfig,
+        loud: bool,
     ) -> Result<(), WindowsEventLogError> {
+        // Warn on sampled attempts, debug otherwise (IBF 0.59.4, port of the PR's sampling).
+        macro_rules! sampled {
+            ($($arg:tt)*) => {
+                if loud {
+                    warn!($($arg)*);
+                } else {
+                    debug!($($arg)*);
+                }
+            };
+        }
         // The old handle is deliberately kept open until the replacement exists.
         //
         // Closing it first would leave a closed handle in `channel_sub` whenever
@@ -1144,7 +1159,7 @@ impl EventLogSubscription {
                     // a soft resume whose behavior is undefined for an empty bookmark
                     // (could replay the whole channel under read_existing_events=false).
                     Err(e) if !channel_sub.bookmark.is_positioned() => {
-                        warn!(
+                        sampled!(
                             message = "Strict bookmark resubscribe failed and the bookmark has no position yet, resubscribing from the configured start.",
                             channel = %channel_sub.channel,
                             error = %e,
@@ -1168,7 +1183,7 @@ impl EventLogSubscription {
                         // when falling straight to FutureEvents (#26120).
                         // Windows may re-deliver a few events; that is safer
                         // than silent loss under read_existing_events=false.
-                        warn!(
+                        sampled!(
                             message = "Strict bookmark resubscribe failed, retrying soft bookmark resume.",
                             channel = %channel_sub.channel,
                             error = %e
@@ -1185,7 +1200,7 @@ impl EventLogSubscription {
                         ) {
                             Ok(handle) => Ok(handle),
                             Err(e2) => {
-                                warn!(
+                                sampled!(
                                     message = "Soft bookmark resubscribe failed, retrying without bookmark. Potential gap or re-delivery of events.",
                                     channel = %channel_sub.channel,
                                     error = %e2,
